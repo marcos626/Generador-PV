@@ -8,7 +8,8 @@ import io
 
 import streamlit as st  # paquetes de terceros
 import pandas as pd
-import matplotlib.pyplot as plt
+
+from Generador_FV import Generador_FV_Sta_Fe  # paquetes propios
 
 st.set_page_config(
     page_title="Inicio",
@@ -17,11 +18,33 @@ st.set_page_config(
 
 with st.sidebar:
     st.write('**CONFIGURACIÓN**')
-    N = st.number_input('Cantidad de paneles', min_value=1, max_value=1000, value=12, step=1)  # st.number_input es un widget de entrda numérica
-    Ppico = st.number_input('Pot. pico del panel (W)', min_value=50, max_value=1000, value=240, step=10)
-    kp = st.number_input('Coef. de pot.-temp. (1/°C)', min_value=-0.01, max_value=0., value=-0.0044, step=0.0001, format='%0.4f')
-    eta = st.number_input('Rendimiento global (p.u.)', min_value=0., max_value=1.0, value=0.97, step=0.01, format='%0.2f')
-    
+
+    opcion = st.radio(
+        "Seleccionar modo de configuración:",
+        ("Configuración UTN Santa Fe", "Configuración Personalizada")
+    )
+
+    if opcion == "Configuración UTN Santa Fe":
+        N = 12
+        Ppico = 240
+        kp = -0.0044
+        eta = 0.97
+        mu = 2
+        Pinv = 2.5
+        st.write(f"**Valores predefinidos:**\n\n"
+                 f"- N = {N}\n"
+                 f"- Ppico = {Ppico} W\n"
+                 f"- kp = {kp} °C⁻¹\n"
+                 f"- η = {eta}\n"
+                 f"- µ = {mu} %\n"
+                 f"- Pinv = {Pinv} kW")
+    else:
+        N = st.number_input('Cantidad de paneles', min_value=1, max_value=1000, value=12, step=1)
+        Ppico = st.number_input('Pot. pico del panel (W)', min_value=50, max_value=1000, value=240, step=10)
+        kp = st.number_input('Coef. de pot.-temp. (1/°C)', min_value=-0.01, max_value=0., value=-0.0044, step=0.0001, format='%0.4f')
+        eta = st.number_input('Rendimiento global (p.u.)', min_value=0., max_value=1.0, value=0.97, step=0.01, format='%0.2f')
+        mu = st.number_input('Umbral de generación (%)', min_value=0., max_value=100., value=2., step=0.1, format='%0.1f')
+        Pinv = st.number_input('Potencia nominal del inversor (kW)', min_value=0.1, max_value=100., value=2.5, step=0.1, format='%0.1f')
 
 tab1, tab2 = st.tabs(['📈 Carga de datos', '📊 Resultados'])
 
@@ -57,9 +80,14 @@ with tab1:
         P & \text {si } P > P_{inv}
         \end{cases}
         ''')
+    """   
+    ## Carga de datos
+    Para realizar la carga de datos, se debe subir un archivo en formato Excel con las columnas:
+    * $G$: Irradiancia global en $W/m^2$
+    * $T$: Temperatura ambiente en $°C$
+    * $P$: Potencia en $kW$
+    """
     
-    
-
     arch = st.file_uploader('Cargar archivo de datos', type='xlsx')
 
     if arch:
@@ -73,6 +101,25 @@ with tab1:
         st.warning('FALTA EL ARCHIVO DE DATOS', icon="⚠️")
 
 with tab2:
+    """
+    Los valores especificados en la barra lateral llamada **CONFIGURACIÓN** se utilizan para calcular la potencia erogada por el GFV.   
+    Por defecto, la cantidad de paneles, la potencia pico de cada panel, el coeficiente de temperatura-potencia y el rendimiento global aparecen con los valores $12$, $240[W]$, $-0.0044[°C^{-1}]$ y $0.97$ respectivamente, los cuales corresponden al generador fotovoltaico instalado en la UTN-FRSF, pero pueden ser modificados por el usuario.  
+    Se asume que la irradiancia global es de $1000[W/m^2]$, la temperatura ambiente es de $25[°C]$ y el umbral de generación es del $2\%$ de la potencia nominal del inversor.  
+    Volvemos a escribir las fórmulas para el cálculo de la potencia erogada por el GFV:
+    """
+    st.latex(r'''P[kW] = N . \frac{G}{G_{Std}} . P_{pico} . [1+k_{p} . (T_c-T_r)] . \eta . 10^{-3}''')
+    st.latex(r'''T_c = T + 0.031[°Cm^2/W].G''')
+    st.latex(r'''P_{min}[kW] = \frac{\mu(\%)}{100} . P_{inv}''')
+    st.latex(r'''P_r[kW]= \begin{cases}
+        0 & \text{si } P \leq P_{min} \\
+        P & \text{si } P_{min} < P \leq P_{inv} \\
+        P & \text {si } P > P_{inv}
+        \end{cases}
+        ''')
+
+    """
+    La siguiente tabla permite seleccionar un día en particular, de los datos cargados. Luego se grafican la potencia erogada, temperatura e irradiancia del GFV a lo largo de ese día.
+    """
     d = st.date_input('Seleccionar día', value=datetime.date(2019, 1, 15), # buscar del archivo excel el primer y el último día
                       min_value=datetime.date(2019, 1, 1), 
                       max_value=datetime.date(2019, 12, 31), 
@@ -81,12 +128,11 @@ with tab2:
         tabla_filtrada = df.loc[f'{d.year}-{d.month}-{d.day}', :]
         st.dataframe(tabla_filtrada)
 
+        """ ### Gráficos de potencia, temperatura e irradiancia en función de la hora del día"""
+        
         st.line_chart(data=tabla_filtrada, y='Potencia (kW)', x_label='Hora', y_label='Pot. (kW)', 
                       color=None, width=None, height=None, use_container_width=True)
-        f, ax = plt.subplots(1, 1, figsize=(10, 5), dpi=800)
-        tabla_filtrada.plot(y='Potencia (kW)', kind='line', ax=ax)
-        st.pyplot(f)
-
+        
         col1, col2 = st.columns(2)
         with col1:
             st.line_chart(data=tabla_filtrada, y=T, x_label='Hora', 
@@ -94,11 +140,38 @@ with tab2:
         with col2:
             st.line_chart(data=tabla_filtrada, y=G, x_label='Hora', 
                       y_label=G)
-        
         nuevo_archivo = io.BytesIO()  # Crea un archivo temporal en memoria RAM
         tabla_filtrada.to_excel(nuevo_archivo)
         st.download_button('Descargar resultados', data= nuevo_archivo, 
                            file_name='Tabla_resultados.xlsx', icon='⬇️')
+        
+        generador = Generador_FV_Sta_Fe(N, Ppico, eta, kp, Pinv, mu)
+        
+        """ ### Seleccionar el rango de tiempo para graficar la potencia generada"""
 
-    
+        # Selección de fecha y hora inicial
+        col1, col2 = st.columns(2)
+        with col1:
+            fecha_inicio = st.date_input("Fecha de inicio", value=datetime.date(2019, 1, 1),
+                                        min_value=datetime.date(2019, 1, 1),
+                                        max_value=datetime.date(2019, 12, 31))
+            hora_inicio = st.time_input("Hora de inicio", value=datetime.time(0, 0))
 
+        # Selección de fecha y hora final
+        with col2:
+            fecha_fin = st.date_input("Fecha de fin", value=datetime.date(2019, 1, 2),
+                                    min_value=datetime.date(2019, 1, 1),
+                                    max_value=datetime.date(2019, 12, 31))
+            hora_fin = st.time_input("Hora de fin", value=datetime.time(23, 50))
+
+        # Convertir selección del usuario en tuplas (d, m, h, mi)
+        tupla1 = (fecha_inicio.day, fecha_inicio.month, hora_inicio.hour, hora_inicio.minute)
+        tupla2 = (fecha_fin.day, fecha_fin.month, hora_fin.hour, hora_fin.minute)
+
+        # Botón para graficar
+        if st.button("Graficar potencia generada en el rango seleccionado"):
+            generador.graficar_pot_rango(tupla1, tupla2)
+
+        if st.button('Graficar energía generada en cada mes del año'):
+            generador.graficar_energia_mensual()
+        
